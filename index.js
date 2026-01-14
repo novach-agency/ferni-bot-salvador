@@ -6,82 +6,100 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ====== ENV ======
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const CAROUSEL_CONTENT_SID = process.env.TWILIO_TEMPLATE_CARRUSEL_SID;
-
-if (!accountSid || !authToken) {
-  console.error('❌ Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN');
-}
-
-if (!CAROUSEL_CONTENT_SID) {
-  console.error('❌ Missing TWILIO_TEMPLATE_CARRUSEL_SID (Carousel Content SID)');
-}
-
-const client = twilio(accountSid, authToken);
-
-// ✅ Tu sender WhatsApp (debe estar habilitado en Twilio/WABA)
 const FROM_WHATSAPP = 'whatsapp:+15515251435';
 
-// Health
-app.get('/', (req, res) => res.status(200).send('OK'));
-app.get('/health', (req, res) => res.status(200).send('OK'));
+// ====== LOGS CLAROS ======
+console.log('🔎 ENV CHECK');
+console.log('PORT =', process.env.PORT);
+console.log('TWILIO_ACCOUNT_SID =', accountSid ? 'OK' : 'MISSING');
+console.log('TWILIO_AUTH_TOKEN =', authToken ? 'OK' : 'MISSING');
+console.log('TWILIO_TEMPLATE_CARRUSEL_SID =', CAROUSEL_CONTENT_SID ? 'OK' : 'MISSING');
 
-// Enviar carrusel (SOLO 1 MENSAJE)
+// ====== TWILIO CLIENT (safe) ======
+let client = null;
+if (accountSid && authToken) {
+  client = twilio(accountSid, authToken);
+} else {
+  console.error('❌ Twilio credentials missing. Bot will not send messages.');
+}
+
+// ====== KEEP ALIVE (CRÍTICO PARA RAILWAY) ======
+setInterval(() => {
+  console.log('🫀 keep-alive tick', new Date().toISOString());
+}, 1000 * 60);
+
+// ====== HEALTH ======
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'ok', service: 'ferni-bot-salvador' });
+});
+
+app.get('/health', (req, res) => {
+  res.status(200).send('ok');
+});
+
+// ====== SEND CAROUSEL ======
 app.post('/send-carousel', async (req, res) => {
   try {
+    if (!client) {
+      return res.status(500).json({ error: 'Twilio not configured' });
+    }
+
     let phone =
       req.body.phone ||
       req.body.phoneNumber ||
       req.body.phone_number ||
       req.body.to;
 
-    if (!phone) return res.status(400).json({ error: 'No phone provided' });
+    if (!phone) {
+      return res.status(400).json({ error: 'No phone provided' });
+    }
 
     phone = String(phone).replace(/\s+/g, '').replace(/^whatsapp:/i, '');
 
-    // Normalización básica MX/USA
     if (!phone.startsWith('+')) {
       const digits = phone.replace(/\D/g, '');
-      if (digits.length === 10) phone = '+521' + digits; // MX móvil
-      else if (digits.length === 11 && digits.startsWith('1')) phone = '+' + digits; // USA
-      else phone = '+' + digits; // fallback
+      if (digits.length === 10) phone = '+521' + digits;
+      else if (digits.length === 11 && digits.startsWith('1')) phone = '+' + digits;
+      else phone = '+' + digits;
     }
 
     if (phone.startsWith('+52') && !phone.startsWith('+521')) {
       phone = phone.replace('+52', '+521');
     }
 
-    if (!accountSid || !authToken) {
-      return res.status(500).json({ error: 'Twilio credentials missing' });
-    }
-    if (!CAROUSEL_CONTENT_SID) {
-      return res.status(500).json({ error: 'Carousel Content SID missing' });
-    }
-
-    const to = `whatsapp:${phone}`;
-
-    console.log(`📤 Sending carousel -> to: ${to} | from: ${FROM_WHATSAPP}`);
-    console.log(`🧩 contentSid: ${CAROUSEL_CONTENT_SID}`);
+    console.log(`📤 Sending carousel to ${phone}`);
 
     const message = await client.messages.create({
       from: FROM_WHATSAPP,
-      to,
-      contentSid: CAROUSEL_CONTENT_SID,
+      to: `whatsapp:${phone}`,
+      contentSid: CAROUSEL_CONTENT_SID
     });
 
-    return res.status(200).json({ success: true, sid: message.sid, status: message.status });
+    console.log('✅ Sent:', message.sid);
+
+    return res.json({ success: true, sid: message.sid });
   } catch (err) {
-    console.error('❌ Error /send-carousel:', err);
-    return res.status(500).json({ error: err.message, code: err.code });
+    console.error('❌ send-carousel error:', err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
-// ✅ IMPORTANT: Railway (Metal Edge) a veces espera 8080.
-// ✅ Usamos PORT si existe, si no, caemos a 8080.
+// ====== SERVER START ======
 const PORT = Number(process.env.PORT) || 8080;
 
-console.log('🔎 process.env.PORT =', process.env.PORT);
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
+  console.log(`🚀 Server listening on ${PORT}`);
+});
+
+// ====== GLOBAL SAFETY ======
+process.on('uncaughtException', (err) => {
+  console.error('🔥 uncaughtException:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('🔥 unhandledRejection:', reason);
 });
