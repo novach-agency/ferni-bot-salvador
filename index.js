@@ -20,7 +20,7 @@ const client = twilio(accountSid, authToken);
 const FROM_WHATSAPP = 'whatsapp:+15515251435';
 
 // ✅ Content SID del carrusel (template aprobado en Twilio Content / WhatsApp)
-const CAROUSEL_CONTENT_SID = process.env.TWILIO_CAROUSEL_CONTENT_SID || 'HX_REEMPLAZA_ESTO';
+const CAROUSEL_CONTENT_SID = process.env.TWILIO_CAROUSEL_CONTENT_SID || 'HX2ad6983945f36aab0cc4e6160aa7a50b';
 
 // Health check
 app.get('/', (req, res) => {
