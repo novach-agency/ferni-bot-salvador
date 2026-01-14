@@ -8,112 +8,98 @@ app.use(express.urlencoded({ extended: true }));
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+if (!accountSid || !authToken) {
+  console.error('❌ Faltan TWILIO_ACCOUNT_SID o TWILIO_AUTH_TOKEN en .env');
+  process.exit(1);
+}
+
 const client = twilio(accountSid, authToken);
 
-const from = 'whatsapp:+13185839825'; // Tu número de Twilio
-const templateInicial = 'HXa7495976c03edc265c142521228c7c2d'; // Template: pregunta inicial
-const templatePlanes = 'HX6d9b55e2462689f45551f978b97426e3'; // Template: planes de precios
+// ✅ Tu número WhatsApp sender (debe existir en Twilio / WABA)
+const FROM_WHATSAPP = 'whatsapp:+15515251435';
 
-// Endpoint para recibir el webhook de Zapier (envía template inicial)
-app.post('/send-template', async (req, res) => {
-  try {
-    console.log('📥 Webhook recibido:', req.body);
-    
-    let phoneNumber = req.body.phone || req.body.phoneNumber || req.body.phone_number;
-    
-    if (!phoneNumber) {
-      return res.status(400).json({ 
-        error: 'No se proporcionó número de teléfono',
-        received: req.body 
-      });
-    }
-    
-    // Asegurar formato +521XXXXXXXXXX
-    phoneNumber = phoneNumber.trim().replace(/\s+/g, '');
-    
-    if (!phoneNumber.startsWith('+')) {
-      phoneNumber = '+521' + phoneNumber;
-    }
-    
-    if (phoneNumber.startsWith('+52') && !phoneNumber.startsWith('+521')) {
-      phoneNumber = phoneNumber.replace('+52', '+521');
-    }
-    
-    console.log(`📤 Enviando template inicial a: ${phoneNumber}`);
-    
-    const message = await client.messages.create({
-      from,
-      to: `whatsapp:${phoneNumber}`,
-      contentSid: templateInicial,
-    });
-    
-    console.log(`✅ Template inicial enviado | SID: ${message.sid}`);
-    
-    res.json({ 
-      success: true, 
-      messageSid: message.sid,
-      to: phoneNumber,
-      status: message.status
-    });
-    
-  } catch (error) {
-    console.error('❌ Error:', error.message);
-    res.status(500).json({ 
-      error: error.message,
-      code: error.code 
-    });
-  }
-});
+// ✅ Content SID del carrusel (template aprobado en Twilio Content / WhatsApp)
+const CAROUSEL_CONTENT_SID = process.env.TWILIO_CAROUSEL_CONTENT_SID || 'HX_REEMPLAZA_ESTO';
 
 // Health check
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'active',
-    service: 'NovaKit AI - WhatsApp Lead Automation',
-    endpoints: ['/send-template', '/webhook/incoming']
+    service: 'NovaKit AI - WhatsApp Carousel Sender (Single Message)',
+    endpoints: ['POST /send-carousel'],
   });
 });
 
-// Webhook para recibir respuestas de WhatsApp
-app.post('/webhook/incoming', async (req, res) => {
+// ✅ Endpoint para enviar SOLO el carrusel
+app.post('/send-carousel', async (req, res) => {
   try {
-    console.log('📨 Mensaje entrante:', req.body);
-    
-    const from = req.body.From; // whatsapp:+5215551234567
-    const body = req.body.Body.toLowerCase().trim();
-    
-    // Verificar si la respuesta es afirmativa
-    const affirmativeResponses = ['si', 'sí', 'claro', 'ok', 'Si', 'dale', 'va', 'Sí, quiero'];
-    const isAffirmative = affirmativeResponses.some(word => body.includes(word));
-    
-    if (isAffirmative) {
-      console.log(`✅ Respuesta afirmativa detectada de: ${from}`);
-      
-      // Enviar template de planes aprobado
-      const templateMessage = await client.messages.create({
-        from: 'whatsapp:+13185839825',
-        to: from,
-        contentSid: templatePlanes, // Template con los planes
+    console.log('📥 Webhook recibido:', req.body);
+
+    let phoneNumber =
+      req.body.phone ||
+      req.body.phoneNumber ||
+      req.body.phone_number ||
+      req.body.to;
+
+    if (!phoneNumber) {
+      return res.status(400).json({
+        error: 'No se proporcionó número de teléfono (phone / phoneNumber / phone_number / to)',
+        received: req.body,
       });
-      
-      console.log(`✅ Template de planes enviado | SID: ${templateMessage.sid}`);
-    } else {
-      console.log(`ℹ️ Respuesta no afirmativa de: ${from} - Mensaje: "${body}"`);
-      // No enviamos nada si dicen que no
     }
-    
-    res.status(200).send('OK');
-    
+
+    // Normalizar
+    phoneNumber = String(phoneNumber).trim().replace(/\s+/g, '');
+
+    // Si viene sin +, asumimos México (+521...)
+    if (!phoneNumber.startsWith('+')) {
+      phoneNumber = '+521' + phoneNumber;
+    }
+
+    // Ajuste común en MX (WhatsApp usa +521 para móviles)
+    if (phoneNumber.startsWith('+52') && !phoneNumber.startsWith('+521')) {
+      phoneNumber = phoneNumber.replace('+52', '+521');
+    }
+
+    const to = `whatsapp:${phoneNumber}`;
+
+    console.log(`📤 Enviando CARRUSEL a: ${to} | from: ${FROM_WHATSAPP}`);
+
+    const message = await client.messages.create({
+      from: FROM_WHATSAPP,
+      to,
+      contentSid: CAROUSEL_CONTENT_SID,
+
+      // Si tu carrusel usa variables, descomenta y manda JSON string:
+      // contentVariables: JSON.stringify({
+      //   "1": "Valor variable 1",
+      //   "2": "Valor variable 2"
+      // })
+    });
+
+    console.log(`✅ Carrusel enviado | SID: ${message.sid} | Status: ${message.status}`);
+
+    return res.json({
+      success: true,
+      messageSid: message.sid,
+      to: phoneNumber,
+      status: message.status,
+      contentSid: CAROUSEL_CONTENT_SID,
+    });
   } catch (error) {
-    console.error('❌ Error en webhook incoming:', error.message);
-    res.status(500).send('Error');
+    console.error('❌ Error enviando carrusel:', error);
+
+    return res.status(500).json({
+      error: error.message,
+      code: error.code,
+      moreInfo: error.moreInfo,
+    });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor de NovaKit AI corriendo en puerto ${PORT}`);
-  console.log(`📡 Endpoints disponibles:`);
-  console.log(`   POST /send-template - Envía template inicial`);
-  console.log(`   POST /webhook/incoming - Recibe respuestas de WhatsApp`);
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
+  console.log(`📡 POST /send-carousel - Envía 1 solo carrusel`);
 });
